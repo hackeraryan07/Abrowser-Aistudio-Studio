@@ -19,13 +19,16 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Public
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.foundation.shape.CircleShape
@@ -109,7 +112,6 @@ fun BrowserApp(
     var currentTabIndex by remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     val currentTab = tabs.getOrNull(currentTabIndex) ?: return
-    val webView = currentTab.webView
     val currentUrl = currentTab.url.value
     var inputUrl by remember(currentTabIndex) { mutableStateOf(currentUrl) }
     val canGoBack = currentTab.canGoBack.value
@@ -118,20 +120,25 @@ fun BrowserApp(
 
     var showSettings by remember { mutableStateOf(false) }
     var showTabManagement by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
+    val history = remember { androidx.compose.runtime.mutableStateListOf<String>() }
 
     val isHome = currentUrl.isEmpty() || currentUrl == "about:blank"
+    val keyboardController = LocalSoftwareKeyboardController.current
 
-    BackHandler(enabled = canGoBack || !isHome || showSettings || showTabManagement) {
+    BackHandler(enabled = canGoBack || !isHome || showSettings || showTabManagement || showHistory) {
         if (showSettings) {
             showSettings = false
         } else if (showTabManagement) {
             showTabManagement = false
+        } else if (showHistory) {
+            showHistory = false
         } else if (canGoBack) {
-            webView?.goBack()
+            currentTab.webView?.goBack()
         } else {
             currentTab.url.value = ""
             inputUrl = ""
-            webView?.loadUrl("about:blank")
+            currentTab.webView?.loadUrl("about:blank")
         }
     }
 
@@ -153,9 +160,9 @@ fun BrowserApp(
                         IconButton(onClick = { 
                             currentTab.url.value = ""
                             inputUrl = ""
-                            webView?.loadUrl("about:blank")
+                            currentTab.webView?.loadUrl("about:blank")
                         }, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Default.Home, contentDescription = "Home", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Icon(Icons.Outlined.Home, contentDescription = "Home", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Spacer(modifier = Modifier.width(4.dp))
                         OutlinedTextField(
@@ -173,13 +180,13 @@ fun BrowserApp(
                                 onGo = {
                                     val url = inputUrl.trim()
                                     if (url.isNotEmpty()) {
+                                        keyboardController?.hide()
                                         val loadUrl = if (android.util.Patterns.WEB_URL.matcher(url).matches() || url.startsWith("http://") || url.startsWith("https://")) {
                                             if (url.startsWith("http://") || url.startsWith("https://")) url else "https://$url"
                                         } else {
                                             "https://www.google.com/search?q=${java.net.URLEncoder.encode(url, "UTF-8")}"
                                         }
                                         currentTab.url.value = loadUrl
-                                        webView?.loadUrl(loadUrl)
                                     }
                                 }
                             ),
@@ -219,7 +226,7 @@ fun BrowserApp(
                         var menuExpanded by remember { mutableStateOf(false) }
                         Box(contentAlignment = Alignment.Center) {
                             IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(40.dp)) {
-                                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Icon(Icons.Default.MoreVert, contentDescription = "Menu", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             
                             DropdownMenu(
@@ -233,7 +240,7 @@ fun BrowserApp(
                                 ) {
                                     IconButton(
                                         onClick = { 
-                                            webView?.goBack()
+                                            currentTab.webView?.goBack()
                                             menuExpanded = false
                                         },
                                         enabled = canGoBack
@@ -242,7 +249,7 @@ fun BrowserApp(
                                     }
                                     IconButton(
                                         onClick = { 
-                                            webView?.goForward()
+                                            currentTab.webView?.goForward()
                                             menuExpanded = false
                                         },
                                         enabled = canGoForward
@@ -259,7 +266,7 @@ fun BrowserApp(
                                     }
                                     IconButton(
                                         onClick = { 
-                                            webView?.reload()
+                                            currentTab.webView?.reload()
                                             menuExpanded = false
                                         }
                                     ) {
@@ -274,6 +281,14 @@ fun BrowserApp(
                                         menuExpanded = false
                                         tabs.add(TabState())
                                         currentTabIndex = tabs.lastIndex
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("History") },
+                                    leadingIcon = { Icon(Icons.Default.History, contentDescription = null) },
+                                    onClick = { 
+                                        menuExpanded = false
+                                        showHistory = true
                                     }
                                 )
                                 DropdownMenuItem(
@@ -327,6 +342,12 @@ fun BrowserApp(
                                     url?.let { 
                                         tab.url.value = it 
                                         if (currentTabIndex == index) inputUrl = it
+                                        if (it.isNotEmpty() && it != "about:blank") {
+                                            if (history.contains(it)) {
+                                                history.remove(it)
+                                            }
+                                            history.add(0, it)
+                                        }
                                     }
                                     tab.canGoBack.value = view?.canGoBack() == true
                                     tab.canGoForward.value = view?.canGoForward() == true
@@ -374,6 +395,9 @@ fun BrowserApp(
                     },
                     update = {
                         it.visibility = if (isTabVisible) android.view.View.VISIBLE else android.view.View.GONE
+                        if (isTabVisible && tab.url.value.isNotEmpty() && tab.url.value != "about:blank" && it.url != tab.url.value) {
+                            it.loadUrl(tab.url.value)
+                        }
                     }
                 )
             }
@@ -381,6 +405,7 @@ fun BrowserApp(
             if (isHome) {
                 BrowserHomeScreen(
                     onSearch = { query ->
+                        keyboardController?.hide()
                         inputUrl = query
                         val loadUrl = if (android.util.Patterns.WEB_URL.matcher(query).matches() || query.startsWith("http://") || query.startsWith("https://")) {
                             if (query.startsWith("http://") || query.startsWith("https://")) query else "https://$query"
@@ -388,7 +413,6 @@ fun BrowserApp(
                             "https://www.google.com/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}"
                         }
                         currentTab.url.value = loadUrl
-                        webView?.loadUrl(loadUrl)
                     }
                 )
             }
@@ -431,6 +455,68 @@ fun BrowserApp(
             },
             onBack = { showTabManagement = false }
         )
+    }
+
+    if (showHistory) {
+        HistoryScreen(
+            history = history,
+            onClose = { showHistory = false },
+            onUrlClick = { url ->
+                showHistory = false
+                currentTab.url.value = url
+                currentTab.webView?.loadUrl(url)
+            },
+            onClearHistory = { history.clear() }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HistoryScreen(
+    history: List<String>,
+    onClose: () -> Unit,
+    onUrlClick: (String) -> Unit,
+    onClearHistory: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("History") },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (history.isNotEmpty()) {
+                        IconButton(onClick = onClearHistory) {
+                            Icon(Icons.Default.Delete, contentDescription = "Clear History")
+                        }
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        if (history.isEmpty()) {
+            Box(modifier = Modifier.padding(innerPadding).fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No history yet", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            androidx.compose.foundation.lazy.LazyColumn(
+                modifier = Modifier.padding(innerPadding).fillMaxSize()
+            ) {
+                items(history.size) { index ->
+                    val url = history[index]
+                    ListItem(
+                        headlineContent = { Text(url, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
+                        leadingContent = { Icon(Icons.Default.History, contentDescription = null) },
+                        modifier = Modifier.clickable { onUrlClick(url) }
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
     }
 }
 
